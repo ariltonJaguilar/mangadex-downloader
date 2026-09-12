@@ -135,6 +135,7 @@ class requestsMangaDexSession(ModifiedSession):
         # QueueWorker for MangaDex network report
         self._worker_report = QueueWorker()
         self._worker_report.start()
+        self._report_available = True
 
         # To prevent conflict with `requests.Session.auth`
         self.api_auth = auth_cls(self)
@@ -440,10 +441,23 @@ class requestsMangaDexSession(ModifiedSession):
         log.info("Logged out from MangaDex")
 
     def _report(self, data):
+        if not self._report_available:
+            return
         pbm.logger.debug("Reporting %s to MangaDex network" % data)
-        r = self.post("https://api.mangadex.network/report", json=data)
+        try:
+            # Delivery reports are optional and must never inherit the retry
+            # policy used by essential API and image requests.
+            r = requests.post(
+                "https://api.mangadex.network/report", json=data,
+                headers=self.api_headers, timeout=3,
+            )
+        except requests.RequestException as error:
+            self._report_available = False
+            pbm.logger.debug("Disabling MangaDex reports for this run: %s", error)
+            return
 
         if r.status_code != 200:
+            self._report_available = False
             pbm.logger.debug("Failed to report %s to MangaDex network" % data)
         else:
             pbm.logger.debug("Successfully send report %s to MangaDex network" % data)

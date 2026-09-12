@@ -24,6 +24,8 @@ import os
 import time
 import logging
 import re
+from requests.exceptions import RequestException
+from urllib3.exceptions import HTTPError as StreamHTTPError
 from .utils import delete_file
 from .network import Net
 from .errors import HTTPException
@@ -42,7 +44,9 @@ class FileDownloader:
         self.real_file = file
         self.replace = replace
         self.headers_request = headers
-        self.chunk_size = 2**13
+        # Larger buffered writes avoid thousands of tiny disk flushes without
+        # increasing the number of requests sent to MangaDex.
+        self.chunk_size = 2**16
 
         # If somehow this is used to sending HTTP requests
         # from another websites (not mangadex) then use requests.Session instead
@@ -85,7 +89,7 @@ class FileDownloader:
             return None
 
     def _parse_headers(self, initial_sizes):
-        headers = self.headers_request or {}
+        headers = self.headers_request.copy()
 
         if initial_sizes:
             headers["Range"] = "bytes=%s-" % initial_sizes
@@ -170,8 +174,7 @@ class FileDownloader:
             else:
                 # This is hack, trust me
                 cr_match = True
-            accept_range = resp.headers.get("accept-ranges")
-            if accept_range is None and not cr_match and os.path.exists(self.file):
+            if initial_file_sizes and (resp.status_code != 206 or not cr_match):
                 # Server didn't support `Range` header
                 pbm.logger.warning(
                     f"Server didn't support resume download, "
@@ -200,21 +203,25 @@ class FileDownloader:
             self._build_progres_bar(initial_file_sizes, float(file_sizes))
 
             # Begin downloading
-            current_size = 0
-            with open(self.file, "ab" if initial_file_sizes else "wb") as writer:
-                while True:
-                    chunk = resp.raw.read(self.chunk_size)
-                    current_size += len(chunk)
-                    self.on_read(chunk)
-                    if not chunk:
-                        break
-                    writer.write(chunk)
-                    writer.flush()
-                    self._update_progress_bar(len(chunk))
+            current_size = initial_file_sizes or 0
+            try:
+                with open(self.file, "ab" if initial_file_sizes else "wb") as writer:
+                    while True:
+                        chunk = resp.raw.read(self.chunk_size)
+                        current_size += len(chunk)
+                        self.on_read(chunk)
+                        if not chunk:
+                            break
+                        writer.write(chunk)
+                        self._update_progress_bar(len(chunk))
+            except (StreamHTTPError, RequestException) as exc:
+                error = exc
+            finally:
+                resp.close()
 
             # See #14
             # Download is not finished but marked as "finished"
-            if current_size < file_sizes:
+            if error is not None or current_size < file_sizes:
                 self.cleanup()
                 pbm.logger.warning(
                     "File download is incomplete, "
@@ -233,7 +240,7 @@ class FileDownloader:
         # - The server didn't send full content of file
         # (received bytes and `Content-Length` header are not same)
         if resp is not None:
-            self.on_error(None, resp)
+            self.on_error(error, resp)
         return False
 
     def _write_final_file(self):
@@ -298,10 +305,11 @@ class ChapterPageDownloader(FileDownloader):
             return
 
         response = resp if resp is not None else err.response
-        content = response.content
+        # A broken or consumed stream cannot be read again for reporting.
+        size = self.report_total_size if response is self.resp else len(response.content)
         t2 = time.perf_counter()
 
-        self._report(response, len(content), round((t2 - self.t1) * 1000), False)
+        self._report(response, size, round((t2 - self.t1) * 1000), False)
 
     def on_receive_response(self, resp):
         self.resp = resp

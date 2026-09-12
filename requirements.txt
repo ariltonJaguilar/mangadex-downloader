@@ -6,4 +6,4 @@ packaging
 pyjwt
 beautifulsoup4
 Pillow==11.1.0
-chardet
+chardet<6

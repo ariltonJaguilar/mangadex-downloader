@@ -33,6 +33,10 @@ from ..progress_bar import progress_bar_manager as pbm
 
 log = logging.getLogger(__name__)
 
+# Keep generated webcomic pages below Pillow's decompression-bomb warning and
+# at a manageable memory size (about 75 MB when decoded as RGB).
+MAX_WEBCOMIC_PIXELS = 25_000_000
+
 try:
     from PIL import Image, ImageFile, ImageSequence, PdfParser, __version__, features
 except ImportError:
@@ -331,6 +335,8 @@ class PDFPlugin:
                 image_ref, procset = _write_image(
                     im, filename, existing_pdf, image_refs
                 )
+                display_width = encoderinfo.get("pdf_page_width", im.width)
+                display_height = im.height * display_width / im.width
 
                 #
                 # page
@@ -344,8 +350,8 @@ class PDFPlugin:
                     MediaBox=[
                         0,
                         0,
-                        im.width * 72.0 / x_resolution,
-                        im.height * 72.0 / y_resolution,
+                        display_width * 72.0 / x_resolution,
+                        display_height * 72.0 / y_resolution,
                     ],
                     Contents=contents_refs[page_number],
                 )
@@ -354,8 +360,8 @@ class PDFPlugin:
                 # page contents
 
                 page_contents = b"q %f 0 0 %f 0 0 cm /image Do Q\n" % (
-                    im.width * 72.0 / x_resolution,
-                    im.height * 72.0 / y_resolution,
+                    display_width * 72.0 / x_resolution,
+                    display_height * 72.0 / y_resolution,
                 )
 
                 existing_pdf.write_obj(contents_refs[page_number], stream=page_contents)
@@ -396,19 +402,102 @@ class PDFFile:
 
     def convert(self, imgs, target):
         pdf_plugin = PDFPlugin(imgs)
+        if not getattr(self, "effective_page_width", 0):
+            requested_width = self.config.pdf_page_width
+            self.effective_page_width = (
+                requested_width if requested_width > 0 else self.find_largest_width(imgs)
+            )
 
         # Because images from BaseFormat.get_images() was just bunch of pathlib.Path
         # objects, we need convert it to _PageRef for be able Modified Pillow can convert it
         images = []
         for im in imgs:
-            images.append(_PageRef(Image.open, im))
+            images.append(_PageRef(self._open_pdf_image, im))
 
         im_ref = images.pop(0)
         im = im_ref()
 
         pdf_plugin.check_truncated(im)
 
-        im.save(target, save_all=True, append_images=images)
+        im.save(
+            target, save_all=True, append_images=images,
+            title=self.manga.title, author=", ".join(self.manga.authors),
+            pdf_page_width=self.effective_page_width,
+            quality=88, optimize=True,
+        )
+
+    @staticmethod
+    def _open_pdf_image(path):
+        image = Image.open(path)
+        image.load()
+        return image
+
+    def _open_normalized_image(self, path):
+        image = Image.open(path)
+        image.load()
+        width = self.effective_page_width
+        if image.width == width:
+            return image
+        height = max(1, round(image.height * width / image.width))
+        resized = image.resize((width, height), Image.Resampling.LANCZOS)
+        image.close()
+        return resized
+
+    @staticmethod
+    def find_largest_width(paths):
+        widths = []
+        for path in paths:
+            with Image.open(path) as image:
+                widths.append(image.width)
+        if not widths:
+            raise ValueError("No images were found to create the PDF")
+        return max(widths)
+
+    def create_webcomic_strips(self, paths, directory, chapter_index):
+        """Join chapter images vertically, splitting only at a safe page height."""
+        width = self.effective_page_width
+        max_height = self.get_webcomic_max_height(width)
+        strips = []
+        current = []
+        current_height = 0
+        strip_number = 1
+
+        def save_strip():
+            nonlocal current, current_height, strip_number
+            if not current:
+                return
+            canvas = Image.new("RGB", (width, current_height), "white")
+            y = 0
+            for piece in current:
+                converted = piece if piece.mode == "RGB" else piece.convert("RGB")
+                canvas.paste(converted, (0, y))
+                y += piece.height
+                if converted is not piece:
+                    converted.close()
+                piece.close()
+            output = directory / f"webcomic_{chapter_index:04d}_{strip_number:03d}.jpg"
+            canvas.save(output, "JPEG", quality=92)
+            canvas.close()
+            strips.append(output)
+            current = []
+            current_height = 0
+            strip_number += 1
+
+        for path in paths:
+            image = self._open_normalized_image(path)
+            for top in range(0, image.height, max_height):
+                piece = image.crop((0, top, width, min(top + max_height, image.height)))
+                if current and current_height + piece.height > max_height:
+                    save_strip()
+                current.append(piece)
+                current_height += piece.height
+            image.close()
+        save_strip()
+        return strips
+
+    @staticmethod
+    def get_webcomic_max_height(width):
+        return max(1, min(width * 8, MAX_WEBCOMIC_PIXELS // width))
 
     def insert_ch_info_img(self, images, chapter, path, count):
         """Insert chapter info (cover) image"""
@@ -478,12 +567,33 @@ class PDFSingle(ConvertedSingleFormat, PDFFile):
 
     def on_prepare(self, file_path, base_path):
         self.images_directory = base_path
+        self.webcomic_chapter_index = 0
+        self.content_images = []
+        self.webcomic_chapters = []
+        cover_path = self.path / "cover.jpg"
+        if cover_path.is_file():
+            self.images.append(cover_path)
 
     def on_iter_chapter(self, file_path, chapter, count):
         self.insert_ch_info_img(self.images, chapter, self.images_directory, count)
 
     def on_finish(self, file_path, images):
+        requested_width = self.config.pdf_page_width
+        self.effective_page_width = (
+            requested_width if requested_width > 0
+            else self.find_largest_width(self.content_images)
+        )
+        if self.config.pdf_layout == "webcomic":
+            for chapter_images in self.webcomic_chapters:
+                self.webcomic_chapter_index += 1
+                self.images.extend(self.create_webcomic_strips(
+                    chapter_images, self.images_directory, self.webcomic_chapter_index
+                ))
+        else:
+            self.images.extend(self.content_images)
         self.worker.submit(lambda: self.convert(self.images, file_path))
 
     def on_received_images(self, file_path, chapter, images):
-        self.images.extend(images)
+        if self.config.pdf_layout == "webcomic":
+            self.webcomic_chapters.append(images)
+        self.content_images.extend(images)

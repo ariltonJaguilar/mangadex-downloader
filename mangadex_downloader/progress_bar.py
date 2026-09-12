@@ -25,6 +25,8 @@ Progress bar manager for volumes, chapters, pages and file sizes
 """
 
 import logging
+import json
+import os
 from tqdm import tqdm
 
 
@@ -278,3 +280,13 @@ class ProgressBarManager:
 
 
 progress_bar_manager = ProgressBarManager()
+
+
+def report_gui_chapter(current, total, chapter):
+    """Send machine-readable chapter progress to the desktop interface."""
+    if os.environ.get("MANGADEXDL_GUI") == "1":
+        payload = json.dumps(
+            {"current": current, "total": total, "chapter": chapter},
+            ensure_ascii=False,
+        )
+        print(f"@@MANGADEX_GUI_PROGRESS@@{payload}", flush=True)

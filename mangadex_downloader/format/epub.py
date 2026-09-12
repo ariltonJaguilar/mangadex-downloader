@@ -56,11 +56,12 @@ log = logging.getLogger(__name__)
 # Inspired from https://github.com/manga-download/hakuneko/blob/master/src/web/mjs/engine/EbookGenerator.mjs
 # TODO: Add doc for this class
 class EpubPlugin:
-    def __init__(self, manga, lang, file_id = ""):
+    def __init__(self, manga, lang, file_id = "", has_cover=False):
         self.manga = manga
         self.id = manga.id
         self.title = f"{manga.title}, {file_id}" if file_id else manga.title
         self.lang = lang
+        self.has_cover = has_cover
 
         self._chapter_pos = 0
         self._chapters = {}
@@ -151,16 +152,11 @@ class EpubPlugin:
             metadata.append(dc_tag)
 
         # Authors
-        authors = ""
-        for index, author in enumerate(self.manga.authors):
-            if index < (len(self.manga.authors) - 1):
-                authors += author + ","
-            else:
-                # If this is last index, append author without comma
-                authors += author
         dc_authors = root.new_tag("dc:creator")
-        dc_authors.string = authors
+        dc_authors.string = ", ".join(self.manga.authors)
         metadata.append(dc_authors)
+        if self.has_cover:
+            metadata.append(root.new_tag("meta", attrs={"name": "cover", "content": "IMAGES_0_1"}))
 
         metadata.append(dc_title)
         metadata.append(dc_language)
@@ -387,8 +383,10 @@ class EPUBFile:
         if not epub_ready:
             raise EpubMissingDependencies()
 
-    def convert(self, manga, lang, chapters, path, file_id = ""):
-        epub = EpubPlugin(manga, lang, file_id)
+    def convert(self, manga, lang, chapters, path, file_id = "", cover_image=None):
+        if cover_image and chapters:
+            chapters[0][1].insert(0, cover_image)
+        epub = EpubPlugin(manga, lang, file_id, has_cover=bool(cover_image))
 
         for chapter, images in chapters:
             epub.create_page(chapter.get_name(), images)
@@ -452,6 +450,8 @@ class EpubVolume(ConvertedVolumesFormat, EPUBFile):
 class EpubSingle(ConvertedSingleFormat, EPUBFile):
     def on_prepare(self, file_path, base_path):
         self.epub_chapters = []
+        cover_path = self.path / "cover.jpg"
+        self.epub_cover = cover_path if cover_path.is_file() else None
 
     def on_finish(self, file_path, images):
         def job():
@@ -460,6 +460,7 @@ class EpubSingle(ConvertedSingleFormat, EPUBFile):
                 self.manga.chapters.language.value,
                 self.epub_chapters,
                 file_path,
+                cover_image=self.epub_cover,
             )
 
         self.worker.submit(job)

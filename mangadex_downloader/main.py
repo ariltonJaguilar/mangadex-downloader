@@ -22,6 +22,8 @@
 
 import logging
 import re
+from pathlib import Path
+from PIL import Image
 from .errors import UnhandledException, MangaDexException, ChapterNotFound
 from .utils import (
     comma_separated_text,
@@ -35,7 +37,7 @@ from .fetcher import get_legacy_id
 from .iterator import CoverArtIterator
 from .mdlist import MangaDexList
 from .manga import Manga
-from .chapter import Chapter
+from .chapter import Chapter, MangaChapter
 from .format import get_format
 from .downloader import FileDownloader
 from .config import config
@@ -43,6 +45,15 @@ from .tracker import get_tracker
 from .path.op import get_path
 
 log = logging.getLogger(__name__)
+
+
+def merge_fallback_chapters(primary, fallback):
+    """Append fallback chapters only where volume/chapter is absent in primary."""
+    existing = {chapter.chapter for chapter in primary.chapters}
+    additions = [chapter for chapter in fallback.chapters
+                 if chapter.chapter not in existing]
+    primary.chapters.extend(additions)
+    return len(additions)
 
 
 def download(
@@ -68,6 +79,12 @@ def download(
     log.info(f"Using {lang.name} language")
 
     manga = Manga(_id=manga_id, use_alt_details=use_alt_details)
+    if config.override_title.strip():
+        manga._title = config.override_title.strip()
+    if config.override_author.strip():
+        manga._custom_authors = [
+            name.strip() for name in config.override_author.split(",") if name.strip()
+        ]
 
     # Check blacklisted tags in manga
     blacklisted, tags = check_blacklisted_tags_manga(manga)
@@ -83,7 +100,24 @@ def download(
 
     if not all_languages:
         log.info("Fetching all chapters...")
-        manga.fetch_chapters(lang.value, all_chapters=True)
+        try:
+            manga.fetch_chapters(lang.value, all_chapters=True)
+        except ChapterNotFound:
+            if not config.fallback_english or lang == Language.English:
+                raise
+            log.info("No chapters found in %s; using English", lang.name)
+            manga.fetch_chapters(Language.English.value, all_chapters=True)
+        else:
+            if config.fallback_english and lang != Language.English:
+                try:
+                    english = MangaChapter(
+                        manga, Language.English.value, all_chapters=True
+                    )
+                except ChapterNotFound:
+                    log.info("No English fallback chapters were found")
+                else:
+                    added = merge_fallback_chapters(manga.chapters, english)
+                    log.info("Added %d missing chapters from English", added)
 
     # Reuse is good
     def download_manga(m, path, splitted_format=False):
@@ -112,11 +146,20 @@ def download(
         cover_path = path / "cover.jpg"
         log.info("Downloading cover manga %s" % manga.title)
 
-        # Determine cover art quality
-        cover_url = get_cover_art_url(manga.id, manga.cover, cover)
+        custom_cover = config.custom_cover.strip()
+        if custom_cover:
+            custom_cover_path = Path(custom_cover).expanduser()
+            if not custom_cover_path.is_file():
+                raise MangaDexException(f"Custom cover was not found: {custom_cover_path}")
+            with Image.open(custom_cover_path) as custom_image:
+                custom_image.convert("RGB").save(cover_path, "JPEG", quality=95)
+            log.info("Using custom cover")
 
-        # Download the cover art
-        if cover == "none":
+        # Determine and download MangaDex cover art when there is no custom cover.
+        cover_url = get_cover_art_url(manga.id, manga.cover, cover)
+        if custom_cover:
+            pass
+        elif cover == "none":
             log.info('Not downloading cover manga, since "cover" is none')
         elif cover_url is None:
             # The manga doesn't have cover
@@ -182,6 +225,7 @@ def download(
             new_manga = Manga(data=manga._data)
             new_manga._title = manga.title
             new_manga._description = manga.description
+            new_manga._custom_authors = manga._custom_authors
 
             # Fetch all chapters
             new_manga.fetch_chapters(translated_lang.value, all_chapters=True)

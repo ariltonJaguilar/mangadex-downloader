@@ -101,7 +101,8 @@ setup(
         "console_scripts": [
             "mangadex-downloader=mangadex_downloader.__main__:main",
             "mangadex-dl=mangadex_downloader.__main__:main",
-        ]
+        ],
+        "gui_scripts": ["mangadex-gui=mangadex_downloader.gui:main"],
     },
     classifiers=[
         "Development Status :: 5 - Production/Stable",

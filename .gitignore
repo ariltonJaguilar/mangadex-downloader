@@ -7,5 +7,6 @@ bugs.txt
 ideas.txt
 *.db
 env
+.venv/
 build/
 dist/

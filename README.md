@@ -10,6 +10,48 @@
 
 A command-line tool to download manga from [MangaDex](https://mangadex.org/), written in [Python](https://www.python.org/).
 
+## Interface gráfica (português)
+
+No Windows, execute `iniciar-interface.bat`. Na primeira abertura, o inicializador cria
+o ambiente isolado e instala automaticamente todos os componentes necessários. É
+preciso ter o Python 3 instalado e estar conectado à internet durante essa preparação.
+
+A janela permite baixar links de mangás, capítulos e listas, escolher pasta, idioma,
+formato (CBZ, imagens, PDF ou EPUB) e intervalo de capítulos. Deixe o intervalo vazio
+para baixar todos os capítulos. CBZ, PDF e EPUB reúnem todos os capítulos selecionados
+em um único arquivo. As escolhas da janela são salvas automaticamente ao iniciar um
+download ou fechar o programa. Se o downloader solicitar uma escolha, digite a resposta
+no campo abaixo do registro e clique em **Enviar**. Os registros originais continuam
+no idioma do downloader. Cancelar ou fechar a janela interrompe o download; arquivos
+já baixados permanecem na pasta.
+
+A opção de fallback em inglês mantém os capítulos disponíveis no idioma escolhido e
+usa a versão inglesa somente para os números de capítulo que estiverem ausentes.
+
+Durante o download, a janela mostra o total de capítulos, o capítulo atual e a
+porcentagem concluída. A leitura da rede usa blocos de 64 KB com gravação em buffer para
+reduzir esperas de disco sem aumentar a quantidade de requisições ao MangaDex. A opção
+de imagens comprimidas também reduz o volume transferido e costuma terminar mais rápido.
+
+O botão **Buscar informações** carrega título e autores do MangaDex para revisão. Esses
+campos podem ser editados antes do download. O título também define o nome do arquivo
+final. Uma imagem local pode ser escolhida como capa; ela será a primeira imagem no CBZ
+ou PDF e será registrada como capa nos metadados do EPUB.
+
+Para PDF no iPad, o programa encontra a maior largura entre as páginas dos capítulos e
+padroniza todas as páginas com essa medida. A capa é desconsiderada no cálculo e é reduzida
+se for mais larga. O modo **Páginas separadas (mangá)** mantém cada imagem como uma página.
+No modo mangá, essa padronização usa as dimensões lógicas do PDF e preserva os pixels da
+imagem original, evitando o aumento excessivo do tamanho do arquivo.
+O modo **Tiras verticais (webcomic)** une as imagens de cada capítulo verticalmente e
+divide apenas tiras excessivamente altas para manter o PDF compatível e leve para leitura.
+Cada segmento de webcomic é limitado a 25 milhões de pixels para controlar o uso de
+memória durante a conversão e no iPad.
+
+Também é possível abrir com `python -m mangadex_downloader.gui` ou, após instalar
+o pacote, com `mangadex-gui`. A interface utiliza Tkinter (incluído no instalador
+oficial do Python para Windows; no Linux, pode exigir o pacote `python3-tk`).
+
 ## Table of Contents
 
 - [Key Features](#key-features)

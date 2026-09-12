@@ -34,6 +34,7 @@ from .placeholders import VolumePlaceholder, SingleChaptersPlaceholder
 from ..downloader import ChapterPageDownloader
 from ..utils import QueueWorker, create_directory, delete_file
 from ..progress_bar import progress_bar_manager as pbm
+from ..progress_bar import report_gui_chapter
 from ..path.op import get_filename
 
 log = logging.getLogger(__name__)
@@ -887,6 +888,8 @@ class ConvertedSingleFormat(BaseConvertedFormat):
 
         pbm.set_volumes_total(len(volumes.keys()))
         # Begin downloading
+        chapter_total = len(data)
+        chapter_position = 0
         for _, chapters in volumes.items():
             pbm.set_chapters_total(len(chapters))
 
@@ -894,6 +897,9 @@ class ConvertedSingleFormat(BaseConvertedFormat):
             volumes_pb = pbm.get_volumes_pb()
 
             for chap_class, chap_images in chapters:
+                report_gui_chapter(
+                    chapter_position, chapter_total, chap_class.get_simplified_name()
+                )
                 self.on_iter_chapter(file_path, chap_class, count)
 
                 ims = self.get_images(chap_class, chap_images, path, count)
@@ -902,6 +908,10 @@ class ConvertedSingleFormat(BaseConvertedFormat):
 
                 chapters_pb.update(1)
                 pbm.get_pages_pb().reset()
+                chapter_position += 1
+                report_gui_chapter(
+                    chapter_position, chapter_total, chap_class.get_simplified_name()
+                )
 
             chapters_pb.reset()
             volumes_pb.update(1)
@@ -953,12 +963,19 @@ class ConvertedSingleFormat(BaseConvertedFormat):
             self.cleanup()
             return
 
-        file_info = tracker.get_all_files_info()
         placeholder_obj = self.create_placeholder_obj_for_single_fmt(cache)
         filename = get_filename(
             self.manga, placeholder_obj, self.file_ext, format="single"
         )
         file_info = tracker.get(filename)
+        if file_info is None:
+            # The tracker can contain an older filename (for example after the
+            # single-file naming template changes). Treat the current filename
+            # as a new download instead of dereferencing a missing record.
+            self.download_single(total, cache)
+            pbm.logger.info("Waiting for chapter read marker to finish")
+            self.cleanup()
+            return
         chapters = []
         # Check for new chapters in existing (downloaded) file
         for chap_class, images in cache:

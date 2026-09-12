@@ -33,7 +33,7 @@ from ..progress_bar import progress_bar_manager as pbm
 log = logging.getLogger(__name__)
 
 
-def generate_Comicinfo(manga, total_pages, chapter=None, volume=None):
+def generate_Comicinfo(manga, total_pages, chapter=None, volume=None, has_cover=False):
     xml_root = ET.Element(
         "ComicInfo",
         {
@@ -48,11 +48,8 @@ def generate_Comicinfo(manga, total_pages, chapter=None, volume=None):
 
     # Authors
     if len(manga.authors) > 0:
-        author_str = ""
-        for author in manga.authors:
-            author_str = author_str + "," + author
         xml_author = ET.SubElement(xml_root, "Writer")
-        xml_author.text = author_str[1:]
+        xml_author.text = ", ".join(manga.authors)
 
     # Artists
     if len(manga.artists) > 0:
@@ -113,6 +110,9 @@ def generate_Comicinfo(manga, total_pages, chapter=None, volume=None):
     # Total pages
     xml_pc = ET.SubElement(xml_root, "PageCount")
     xml_pc.text = str(total_pages)
+    if has_cover:
+        xml_pages = ET.SubElement(xml_root, "Pages")
+        ET.SubElement(xml_pages, "Page", {"Image": "0", "Type": "FrontCover"})
 
     # Web URL
     xml_url = ET.SubElement(xml_root, "Web")
@@ -253,6 +253,11 @@ class ComicBookArchiveSingle(ConvertedSingleFormat, CBZFile):
         self.images_directory = base_path
         self.zip = self.make_zip(file_path)
         self.total_pages = 0
+        cover_path = self.path / "cover.jpg"
+        self.has_cover = cover_path.is_file()
+        if self.has_cover:
+            self.zip.write(cover_path, "000_cover.jpg")
+            self.total_pages += 1
 
     def on_iter_chapter(self, file_path, chapter, count):
         if self.config.use_chapter_cover:
@@ -264,5 +269,7 @@ class ComicBookArchiveSingle(ConvertedSingleFormat, CBZFile):
         )
 
     def on_finish(self, file_path, images):
-        self.insert_comic_info_xml(self.zip, total_pages=self.total_pages)
+        self.insert_comic_info_xml(
+            self.zip, total_pages=self.total_pages, has_cover=self.has_cover
+        )
         self.worker.submit(lambda: self.convert(self.zip, images))

@@ -89,6 +89,14 @@ class _Config:
         "filename_chapter": ("{chapter.simple_name}{file_ext}", validate_dummy),
         "filename_volume": ("Vol. {volume}{file_ext}", validate_dummy),
         "filename_single": ("All chapters{file_ext}", validate_dummy),
+        "override_title": ("", validate_dummy),
+        "override_author": ("", validate_dummy),
+        "custom_cover": ("", validate_dummy),
+        "fallback_english": (False, validate_bool),
+        "pdf_page_width": (0, validate_int),
+        "pdf_layout": (
+            "pages", lambda x: validate_value_from_iterator(x, ("pages", "webcomic"))
+        ),
         "dns_over_https": (None, validate_doh_provider),
         "no_group_name": (False, validate_bool),
         "sort_by": ("volume", validate_sort_by),

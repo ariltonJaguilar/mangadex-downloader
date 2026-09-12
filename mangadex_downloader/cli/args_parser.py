@@ -224,6 +224,18 @@ def get_args(argv):
         "The application will exit after writing manga information",
         default=config.manga_info_only,
     )
+    manga_group.add_argument(
+        "--override-title", default=config.override_title,
+        help="Override the manga title used in filenames and metadata",
+    )
+    manga_group.add_argument(
+        "--override-author", default=config.override_author,
+        help="Override comma-separated manga authors used in metadata",
+    )
+    manga_group.add_argument(
+        "--custom-cover", default=config.custom_cover,
+        help="Use a local image as the cover of single-file formats",
+    )
 
     # Group related
     grp_group = parser.add_argument_group("Group")
@@ -265,6 +277,10 @@ def get_args(argv):
         action=ListLanguagesAction,
         help="List all available languages",
         nargs=0,
+    )
+    lang_group.add_argument(
+        "--fallback-english", action="store_true", default=config.fallback_english,
+        help="Use English chapters when the selected language is missing a chapter",
     )
     lang_group.add_argument(
         "-vcl",
@@ -486,6 +502,14 @@ def get_args(argv):
         choices=formats.keys(),
         help="Select save as format, default to `raw`",
         default=config.save_as,
+    )
+    save_as_group.add_argument(
+        "--pdf-page-width", type=int, default=config.pdf_page_width,
+        help="Normalize PDF pages and cover to this width in pixels",
+    )
+    save_as_group.add_argument(
+        "--pdf-layout", choices=("pages", "webcomic"), default=config.pdf_layout,
+        help="Use separate manga pages or long webcomic strips in PDF files",
     )
 
     # Network related

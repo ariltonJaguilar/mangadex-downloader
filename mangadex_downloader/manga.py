@@ -100,6 +100,7 @@ class Manga:
 
         self._artists = artists
         self._authors = authors
+        self._custom_authors = None
         self._cover = cover_art
         self._attr = self._data.get("attributes")
         self._use_alt_details = use_alt_details
@@ -142,6 +143,8 @@ class Manga:
     @property
     def authors(self):
         """List[:class:`str`]: Author of the manga"""
+        if self._custom_authors is not None:
+            return self._custom_authors
         return [i.name for i in self._authors]
 
     @property
