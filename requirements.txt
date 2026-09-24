@@ -1,9 +1,0 @@
-requests-doh==1.0.0
-requests[socks]
-tqdm
-pathvalidate
-packaging
-pyjwt
-beautifulsoup4
-Pillow==11.1.0
-chardet<6

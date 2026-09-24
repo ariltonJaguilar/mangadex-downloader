@@ -1,0 +1,7 @@
+typer
+rich
+requests
+Pillow
+reportlab
+pyqt6
+nodriver==0.50.3
