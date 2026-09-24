@@ -31,7 +31,8 @@ class User:
             self.data = data
 
         self.id = self.data["id"]
-        attr = self.data["attributes"]
+        # Chapter relationships can contain only the user's ID and type.
+        attr = self.data.get("attributes") or {}
 
-        self.name = attr["username"]
-        self.roles = attr["roles"]
+        self.name = attr.get("username") or self.id
+        self.roles = attr.get("roles") or []
